@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>RAG Assistant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    :root{
+      --bg:#0b1020; --surface:#0f172a; --muted:#9fb0c8; --text:#e8ecf6; --border:#1b2544;
+      --accent:#22d3ee; --accent2:#4ade80;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:radial-gradient(1200px 600px at 20% -20%, #15213b 0%, transparent 60%),linear-gradient(#0a0f1d,#0b1020 40%,#0b1122);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Helvetica Neue",Arial}
+    .wrap{max-width:1100px;margin:28px auto;padding:0 18px}
+    .hero{ text-align:center; margin-bottom:18px }
+    .hero h1{ margin:0 0 6px; font-size:28px }
+    .hero p{ margin:0; color:var(--muted) }
+
+    .tabs{ display:flex; gap:10px; justify-content:center; margin:14px 0 18px }
+    .tab{ padding:10px 14px; border:1px solid var(--border); border-radius:12px; background:#0f172a; color:var(--text); cursor:pointer }
+    .tab.active{ outline:1px solid #2a3b66; background:#101a34 }
+
+    .grid{ display:grid; grid-template-columns: 1fr; gap:16px }
+    @media(min-width:980px){ .grid{ grid-template-columns: 1.2fr 1fr } }
+
+    .card{ background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:16px; box-shadow:0 12px 28px rgba(0,0,0,.35) }
+    .card h3{ margin:0 0 10px }
+    .hint{ color:var(--muted); font-size:12px }
+
+    .file-box{ border:2px dashed #223056; border-radius:14px; padding:18px; background:#0a1327; text-align:center; cursor:pointer }
+    .file-box:hover{ border-color:var(--accent) }
+    .file-input{ position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0 }
+    .file-list{ list-style:none; padding:0; margin:8px 0 0; display:flex; flex-wrap:wrap; gap:8px }
+    .file-list li{ padding:6px 10px; border:1px solid var(--border); border-radius:999px; background:#0a1327; font-size:12px; color:#dfe8ff }
+
+    .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+    .btn{ padding:10px 14px; border:none; border-radius:12px; color:white; background:linear-gradient(90deg,var(--accent),#7c3aed); cursor:pointer }
+    .btn:disabled{ opacity:.6; cursor:not-allowed }
+    input[type="text"], input[type="number"], select, textarea{
+      width:100%; padding:12px 14px; border-radius:12px; border:1px solid var(--border); background:#0a1327; color:var(--text); outline:none
+    }
+
+    .panel{ display:none }
+    .panel.active{ display:block }
+
+    .chat-log{ background:#0a1122; border:1px solid var(--border); border-radius:14px; padding:12px; height:320px; overflow:auto }
+    .msg{ padding:10px 12px; border-radius:12px; margin:8px 0; max-width:80% }
+    .msg.user{ align-self:flex-end; background:#131f38; border:1px solid #23365f }
+    .msg.ai{ align-self:flex-start; background:#0b2e32; border:1px solid #1a4950 }
+
+    .list{ display:flex; flex-direction:column; gap:10px }
+    .item{ padding:12px; border-radius:12px; border:1px solid var(--border); background:#0a1327 }
+    .questions{ margin:0; padding-left:20px }
+    .questions li{ margin:8px 0 }
+    .questions .opts{ margin:6px 0 0 0; padding-left:18px }
+    .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; color:#062016; background:linear-gradient(90deg,#34d399,#22d3ee) }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>RAG Assistant</h1>
+      <p>Upload PDFs, then ask questions or generate tests from them.</p>
+    </section>
+
+    <div class="tabs" role="tablist" aria-label="Main">
+      <button class="tab active" data-tab="ask" aria-selected="true">Ask</button>
+      <button class="tab" data-tab="test" aria-selected="false">Generate Test</button>
+    </div>
+
+    <div class="grid">
+      <!-- Left: Upload -->
+      <section class="card" aria-label="Upload PDFs">
+        <h3>Choose PDFs</h3>
+        <p class="hint">PDF only, multiple allowed. These are indexed for retrieval.</p>
+        <input id="files" class="file-input" type="file" name="files" accept=".pdf" multiple />
+        <label for="files" class="file-box">
+          <strong>Click to choose PDFs</strong><br/>
+          <span class="hint">or drag & drop here</span>
+        </label>
+        <ul id="file-list" class="file-list" aria-live="polite"></ul>
+        <div class="row" style="margin-top:10px">
+          <button id="upload-btn" class="btn">Upload & Index</button>
+          <span id="upload-hint" class="hint">Not uploaded yet.</span>
+        </div>
+      </section>
+
+      <!-- Right: Panels -->
+      <section>
+        <!-- Ask -->
+        <div id="panel-ask" class="panel active card">
+          <h3>Ask</h3>
+          <div id="chat-log" class="chat-log"></div>
+          <div class="row" style="margin-top:10px">
+            <input id="question" type="text" placeholder="Ask a question from your PDFs…" />
+            <button id="ask-btn" class="btn">Ask</button>
+          </div>
+        </div>
+
+        <!-- Test -->
+        <div id="panel-test" class="panel card">
+          <div class="row" style="justify-content:space-between">
+            <h3>Generate Test</h3><span class="badge">MCQ / Short / Long</span>
+          </div>
+          <div class="row">
+            <input id="topic" type="text" placeholder="e.g., Ray Optics and Atoms" />
+            <input id="num_questions" type="number" min="1" max="50" value="8" />
+            <select id="qtype"><option value="mcq">MCQ</option><option value="short">Short</option><option value="long">Long</option></select>
+            <select id="difficulty"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="hard">Hard</option></select>
+            <button id="gen-btn" class="btn">Generate</button>
+          </div>
+          <div id="test-output" class="list" style="margin-top:10px">
+            <!-- Filled by JS -->
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    // Tabs
+    document.querySelectorAll('.tab').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        const k = btn.dataset.tab;
+        document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+        document.getElementById('panel-'+k).classList.add('active');
+      });
+    });
+
+    // File listing + drag drop
+    const input = document.getElementById('files');
+    const list = document.getElementById('file-list');
+    const fileBox = document.querySelector('.file-box');
+    input.addEventListener('change', ()=>{ list.innerHTML=''; [...input.files].forEach(f=>{ const li=document.createElement('li'); li.textContent=f.name; list.appendChild(li); }); });
+    ;['dragenter','dragover'].forEach(evn=>fileBox.addEventListener(evn,e=>{e.preventDefault();fileBox.style.borderColor='var(--accent)'}));
+    ;['dragleave','drop'].forEach(evn=>fileBox.addEventListener(evn,e=>{e.preventDefault();fileBox.style.borderColor='#223056'}));
+    fileBox.addEventListener('drop', e=>{
+      const files = [...(e.dataTransfer?.files||[])].filter(f=>f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf'));
+      if(files.length){
+        const dt = new DataTransfer(); files.forEach(f=>dt.items.add(f)); input.files = dt.files; input.dispatchEvent(new Event('change'));
+      }
+    });
+
+    // Upload to /upload with key "files"
+    const uploadBtn = document.getElementById('upload-btn');
+    const uploadHint = document.getElementById('upload-hint');
+    uploadBtn.addEventListener('click', async ()=>{
+      const files = input.files;
+      if(!files || !files.length){ alert('Choose at least one PDF.'); return; }
+      const fd = new FormData(); [...files].forEach(f=>fd.append('files', f)); // exact key: files
+      uploadBtn.disabled=true; uploadBtn.textContent='Uploading…';
+      try{
+        const res = await fetch('/upload',{method:'POST', body: fd});
+        const data = await res.json();
+        if(!res.ok){ uploadHint.textContent = 'Error: '+(data.error||'Unknown'); return; }
+        uploadHint.textContent = `Indexed ${Array.isArray(data.files)?data.files.length:0} file(s), chunks ${data.chunks_indexed ?? '—'}.`;
+      }catch{ uploadHint.textContent = 'Network error'; }
+      finally{ uploadBtn.disabled=false; uploadBtn.textContent='Upload & Index'; }
+    });
+
+    // Chat UI
+    const chatLog = document.getElementById('chat-log');
+    function addMsg(role, text){ const div=document.createElement('div'); div.className='msg '+(role==='user'?'user':'ai'); div.textContent=text; chatLog.appendChild(div); chatLog.scrollTop=chatLog.scrollHeight; }
+
+    document.getElementById('ask-btn').addEventListener('click', async ()=>{
+      const q = document.getElementById('question').value.trim(); if(!q) return;
+      addMsg('user', q); document.getElementById('question').value='';
+      try{
+        const res = await fetch('/ask',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({question:q})});
+        const data = await res.json();
+        addMsg('ai', (data && typeof data.answer==='string')? data.answer : 'No answer');
+      }catch{ addMsg('ai','Network error'); }
+    });
+
+    // Generate Test rendering
+    function renderTest(payload){
+      const out = document.getElementById('test-output'); out.innerHTML='';
+      const head = document.createElement('div'); head.className='item'; head.innerHTML='<strong>Test Preview</strong>'; out.appendChild(head);
+      const qs = Array.isArray(payload?.questions)? payload.questions : (Array.isArray(payload)? payload : []);
+      if(!qs.length){ const k=document.createElement('div'); k.className='item'; k.textContent='No questions returned.'; out.appendChild(k); return; }
+      const ol = document.createElement('ol'); ol.className='questions';
+      qs.forEach((q,i)=>{
+        const li = document.createElement('li');
+        li.innerHTML = `<span class="q">${(q.question||q.prompt||('Question '+(i+1)))}</span>`;
+        if(Array.isArray(q.options)&&q.options.length){
+          const ul=document.createElement('ul'); ul.className='opts'; q.options.forEach(o=>{ const li2=document.createElement('li'); li2.textContent=String(o); ul.appendChild(li2); }); li.appendChild(ul);
+        }
+        if(q.answer!==undefined){ const ans=document.createElement('div'); ans.className='ans'; ans.textContent='Answer: '+String(q.answer); li.appendChild(ans); }
+        ol.appendChild(li);
+      });
+      out.appendChild(ol);
+    }
+    document.getElementById('gen-btn').addEventListener('click', async ()=>{
+      const topic = document.getElementById('topic').value.trim(); if(!topic) return;
+      const num_questions = +document.getElementById('num_questions').value || 8;
+      const qtype = document.getElementById('qtype').value; const difficulty = document.getElementById('difficulty').value;
+      const btn = document.getElementById('gen-btn'); btn.disabled=true; btn.textContent='Generating…';
+      try{
+        const res = await fetch('/test',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({topic, num_questions, qtype, difficulty})});
+        const data = await res.json(); if(!res.ok){ renderTest({questions:[]}); return; } renderTest(data);
+      }catch{ renderTest({questions:[]}); }
+      finally{ btn.disabled=false; btn.textContent='Generate'; }
+    });
+  </script>
+</body>
+</html>
