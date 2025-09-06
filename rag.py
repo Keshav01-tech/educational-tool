@@ -1,5 +1,4 @@
 import os
-##Add your open ai key
 from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_chroma import Chroma as ChromaCommunity
@@ -13,18 +12,17 @@ from langchain.schema import Document
 import json
 from datetime import datetime
 import os
+from langchain.retrievers import EnsembleRetriever
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-
+from langchain_community.retrievers import BM25Retriever
 loader = DirectoryLoader(
     "leph2dd",            
     glob="**/*.pdf",      
     loader_cls=PyPDFLoader
 )
 
-docs = loader.load()
 document = loader.load()
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 text_spillter  = RecursiveCharacterTextSplitter(chunk_size = 1000 , chunk_overlap = 200)
 text = text_spillter.split_documents(document)
 from langchain import embeddings
@@ -35,10 +33,15 @@ vectordb = ChromaCommunity.from_documents(documents=text ,
                                  persist_directory=persist_directory)
 
 vectordb = ChromaCommunity(persist_directory=persist_directory, embedding_function=embedding)
-retriever = vectordb.as_retriever(search_kwargs={"k": 4})
+dense_ret = vectordb.as_retriever(search_kwargs={"k": 8})
+bm25 = BM25Retriever.from_documents(text)
+bm25.k = 8
+
+
+retriever = EnsembleRetriever(retrievers=[bm25, dense_ret], weights=[0.5, 0.5])
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
 
-SYSTEM_PROMPT = "Answer using only the provided context. If not present, say you don't know. Keep answers concise."
+SYSTEM_PROMPT = "Answer using only the provided context. If not present, give genric responce. Keep answers concise."
 HUMAN_PROMPT = """Context:
 {context}
 
